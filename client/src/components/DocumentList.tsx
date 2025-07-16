@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchDocuments } from '../services/api';
+import { fetchDocuments, analyzeDocumentAI, deleteDocument } from '../services/api';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -15,6 +15,8 @@ interface Document {
   image_width?: number;
   image_height?: number;
   pdf_page_count?: number;
+  ai_classification?: string;
+  ai_summary?: string;
 }
 
 const getFileUrl = (filename: string) => `${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:3001'}/files/${filename}`;
@@ -27,6 +29,8 @@ const DocumentList: React.FC = () => {
   const [modalText, setModalText] = useState<string>('');
   const [modalTitle, setModalTitle] = useState<string>('');
   const [ocrLoadingId, setOcrLoadingId] = useState<number | null>(null);
+  const [aiLoadingId, setAiLoadingId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<string>('');
 
   useEffect(() => {
     fetchDocuments()
@@ -62,17 +66,60 @@ const DocumentList: React.FC = () => {
     }
   };
 
+  const runAI = async (doc: Document) => {
+    setAiLoadingId(doc.id);
+    try {
+      await analyzeDocumentAI(doc.id);
+      const docs = await fetchDocuments();
+      setDocuments(docs);
+      toast.success('AI analysis complete!');
+    } catch {
+      toast.error('AI analysis failed');
+    } finally {
+      setAiLoadingId(null);
+    }
+  };
+
+  const handleDelete = async (doc: Document) => {
+    if (!window.confirm(`Delete document "${doc.original_name}"?`)) return;
+    try {
+      await deleteDocument(doc.id);
+      setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+      toast.success('Document deleted');
+    } catch {
+      toast.error('Failed to delete document');
+    }
+  };
+
+  const classifications = Array.from(new Set(documents.map(d => d.ai_classification).filter(Boolean)));
+  const filteredDocs = filter ? documents.filter(d => d.ai_classification === filter) : documents;
+
   if (loading) return <div className="text-center mt-8">Loading documents...</div>;
   if (error) return <div className="text-center text-red-500 mt-8">{error}</div>;
 
   return (
     <div className="w-full max-w-2xl mx-auto mt-8">
       <h2 className="text-xl font-semibold mb-4">Uploaded Documents</h2>
-      {documents.length === 0 ? (
+      {classifications.length > 0 && (
+        <div className="mb-4 flex gap-2 items-center">
+          <span className="text-sm">Filter by classification:</span>
+          <select
+            className="border rounded px-2 py-1 text-sm"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+          >
+            <option value="">All</option>
+            {classifications.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {filteredDocs.length === 0 ? (
         <div className="text-gray-500">No documents uploaded yet.</div>
       ) : (
         <ul className="divide-y divide-gray-200">
-          {documents.map((doc) => (
+          {filteredDocs.map((doc) => (
             <li key={doc.id} className="py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {doc.mime_type.startsWith('image/') && (
@@ -95,6 +142,14 @@ const DocumentList: React.FC = () => {
                   {/* PDF metadata */}
                   {doc.mime_type === 'application/pdf' && doc.pdf_page_count && (
                     <div className="text-xs text-gray-600">Pages: {doc.pdf_page_count}</div>
+                  )}
+                  {/* AI classification */}
+                  {doc.ai_classification && (
+                    <div className="text-xs text-purple-700 font-semibold mt-1">Classification: {doc.ai_classification}</div>
+                  )}
+                  {/* AI summary */}
+                  {doc.ai_summary && (
+                    <div className="text-xs text-gray-700 mt-1">Summary: {doc.ai_summary}</div>
                   )}
                 </div>
               </div>
@@ -124,6 +179,19 @@ const DocumentList: React.FC = () => {
                     {ocrLoadingId === doc.id ? 'Re-running OCR...' : 'Re-run OCR (server)'}
                   </button>
                 )}
+                <button
+                  className="text-xs text-white bg-purple-600 hover:bg-purple-700 px-2 py-1 rounded mt-1 disabled:opacity-60"
+                  onClick={() => runAI(doc)}
+                  disabled={aiLoadingId === doc.id}
+                >
+                  {aiLoadingId === doc.id ? 'Analyzing...' : 'Classify (AI)'}
+                </button>
+                <button
+                  className="text-xs text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded mt-1"
+                  onClick={() => handleDelete(doc)}
+                >
+                  Delete
+                </button>
               </div>
             </li>
           ))}

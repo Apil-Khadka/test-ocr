@@ -6,3 +6,12 @@ export async function fetchDocuments() {
   const res = await axios.get(`${API_URL}/documents`);
   return res.data;
 }
+
+export async function analyzeDocumentAI(id: number) {
+  const res = await axios.post(`${API_URL}/documents/${id}/analyze/ai`);
+  return res.data;
+}
+
+export async function deleteDocument(id: number) {
+  await axios.delete(`${API_URL}/documents/${id}`);
+}

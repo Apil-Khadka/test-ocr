@@ -2,7 +2,7 @@ import { getDb } from './db';
 
 async function init() {
   const db = await getDb();
-  // Add columns for richer metadata
+  // Add columns for richer metadata and AI analysis
   await db.exec(`
     CREATE TABLE IF NOT EXISTS documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,9 +16,20 @@ async function init() {
       image_height INTEGER,
       pdf_page_count INTEGER,
       indexed_text TEXT,
+      ai_classification TEXT,
+      ai_summary TEXT,
       upload_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // Add missing columns if table already exists
+  const columns = await db.all(`PRAGMA table_info(documents);`);
+  const colNames = columns.map((c: any) => c.name);
+  if (!colNames.includes('ai_classification')) {
+    await db.exec('ALTER TABLE documents ADD COLUMN ai_classification TEXT;');
+  }
+  if (!colNames.includes('ai_summary')) {
+    await db.exec('ALTER TABLE documents ADD COLUMN ai_summary TEXT;');
+  }
   await db.close();
   console.log('Database initialized.');
 }

@@ -6,6 +6,7 @@ import { getDb } from '../models/db';
 import sharp from 'sharp';
 const pdfParse = require('pdf-parse');
 import Tesseract from 'tesseract.js';
+import { analyzeWithOllama } from '../services/ollamaService';
 
 const router = express.Router();
 
@@ -147,6 +148,76 @@ router.post('/:id/analyze', async (req: Request, res: Response) => {
     res.json({ extracted_text: ocrText });
   } catch (err) {
     res.status(500).json({ error: 'Failed to re-run OCR', details: (err as Error).message });
+  }
+});
+
+// POST /api/documents/:id/analyze/ai
+router.post('/:id/analyze/ai', async (req: Request, res: Response) => {
+  const docId = req.params.id;
+  try {
+    const db = await getDb();
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', docId);
+    if (!doc) {
+      await db.close();
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    if (!doc.indexed_text || !doc.indexed_text.trim()) {
+      await db.close();
+      return res.status(400).json({ error: 'No text to analyze' });
+    }
+    // Prompt for classification and summary
+    const prompt = `Classify the following document and provide a summary.\n\nText:\n${doc.indexed_text}\n\nRespond in JSON with keys: classification, summary.`;
+    const aiResponse = await analyzeWithOllama(prompt);
+    let classification = null;
+    let summary = null;
+    try {
+      let cleaned = aiResponse.trim();
+      // Remove code block markers (```json, ``` or .json)
+      cleaned = cleaned.replace(/^(```json|```|\.json)/i, '').trim();
+      cleaned = cleaned.replace(/```$/, '').trim();
+      // Extract the JSON object between the first { and the last }
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+      }
+      // Try to parse JSON (possibly double-encoded)
+      let parsed = JSON.parse(cleaned);
+      if (typeof parsed === 'string') {
+        parsed = JSON.parse(parsed);
+      }
+      classification = (parsed.classification || parsed.Classification || '').toString().trim() || null;
+      summary = (parsed.summary || parsed.Summary || '').toString().trim() || null;
+    } catch {
+      summary = aiResponse;
+    }
+    await db.run('UPDATE documents SET ai_classification = ?, ai_summary = ? WHERE id = ?', classification, summary, docId);
+    await db.close();
+    res.json({ classification, summary, raw: aiResponse });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to analyze with AI', details: (err as Error).message });
+  }
+});
+
+// DELETE /api/documents/:id
+router.delete('/:id', async (req: Request, res: Response) => {
+  const docId = req.params.id;
+  try {
+    const db = await getDb();
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', docId);
+    if (!doc) {
+      await db.close();
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    // Remove file from disk
+    try {
+      fs.unlinkSync(doc.file_path);
+    } catch {}
+    await db.run('DELETE FROM documents WHERE id = ?', docId);
+    await db.close();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete document', details: (err as Error).message });
   }
 });
 
