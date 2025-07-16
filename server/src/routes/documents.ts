@@ -7,6 +7,7 @@ import sharp from 'sharp';
 const pdfParse = require('pdf-parse');
 import Tesseract from 'tesseract.js';
 import { analyzeWithOllama } from '../services/ollamaService';
+import { spawn } from 'child_process';
 
 const router = express.Router();
 
@@ -154,6 +155,7 @@ router.post('/:id/analyze', async (req: Request, res: Response) => {
 // POST /api/documents/:id/analyze/ai
 router.post('/:id/analyze/ai', async (req: Request, res: Response) => {
   const docId = req.params.id;
+  const categories: string[] = Array.isArray(req.body?.categories) ? req.body.categories : [];
   try {
     const db = await getDb();
     const doc = await db.get('SELECT * FROM documents WHERE id = ?', docId);
@@ -165,23 +167,23 @@ router.post('/:id/analyze/ai', async (req: Request, res: Response) => {
       await db.close();
       return res.status(400).json({ error: 'No text to analyze' });
     }
-    // Prompt for classification and summary
-    const prompt = `Classify the following document and provide a summary.\n\nText:\n${doc.indexed_text}\n\nRespond in JSON with keys: classification, summary.`;
+    // Prompt for classification and summary, with categories if provided
+    let prompt = `Classify the following document and provide a summary.\n\nText:\n${doc.indexed_text}\n\nRespond in JSON with keys: classification, summary.`;
+    if (categories.length > 0) {
+      prompt = `Classify the following document and provide a summary.\n\nText:\n${doc.indexed_text}\n\nPossible categories: ${categories.join(', ')}\n\nRespond in JSON with keys: classification, summary. Use an existing category if it fits.`;
+    }
     const aiResponse = await analyzeWithOllama(prompt);
     let classification = null;
     let summary = null;
     try {
       let cleaned = aiResponse.trim();
-      // Remove code block markers (```json, ``` or .json)
       cleaned = cleaned.replace(/^(```json|```|\.json)/i, '').trim();
       cleaned = cleaned.replace(/```$/, '').trim();
-      // Extract the JSON object between the first { and the last }
       const firstBrace = cleaned.indexOf('{');
       const lastBrace = cleaned.lastIndexOf('}');
       if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
         cleaned = cleaned.substring(firstBrace, lastBrace + 1);
       }
-      // Try to parse JSON (possibly double-encoded)
       let parsed = JSON.parse(cleaned);
       if (typeof parsed === 'string') {
         parsed = JSON.parse(parsed);
@@ -196,6 +198,38 @@ router.post('/:id/analyze/ai', async (req: Request, res: Response) => {
     res.json({ classification, summary, raw: aiResponse });
   } catch (err) {
     res.status(500).json({ error: 'Failed to analyze with AI', details: (err as Error).message });
+  }
+});
+
+// POST /api/documents/:id/classify-donut
+router.post('/:id/classify-donut', async (req: Request, res: Response) => {
+  const docId = req.params.id;
+  try {
+    const db = await getDb();
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', docId);
+    if (!doc) {
+      await db.close();
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const filePath = doc.file_path;
+    // Call the Python script
+    const py = spawn('python', [require('path').resolve(__dirname, '../../donut_classify.py'), filePath]);
+    let output = '';
+    let error = '';
+    py.stdout.on('data', (data) => { output += data.toString(); });
+    py.stderr.on('data', (data) => { error += data.toString(); });
+    py.on('close', async (code) => {
+      if (code === 0 && output.trim()) {
+        await db.run('UPDATE documents SET donut_classification = ? WHERE id = ?', output.trim(), docId);
+        await db.close();
+        res.json({ donut_classification: output.trim() });
+      } else {
+        await db.close();
+        res.status(500).json({ error: 'Donut classification failed', details: error || 'No output' });
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to run Donut classification', details: (err as Error).message });
   }
 });
 

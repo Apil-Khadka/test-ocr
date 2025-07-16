@@ -7,11 +7,16 @@ export async function fetchDocuments() {
   return res.data;
 }
 
-export async function analyzeDocumentAI(id: number) {
-  const res = await axios.post(`${API_URL}/documents/${id}/analyze/ai`);
+export async function analyzeDocumentAI(id: number, categories?: string[]) {
+  const res = await axios.post(`${API_URL}/documents/${id}/analyze/ai`, categories ? { categories } : undefined);
   return res.data;
 }
 
 export async function deleteDocument(id: number) {
   await axios.delete(`${API_URL}/documents/${id}`);
+}
+
+export async function classifyDocumentDonut(id: number) {
+  const res = await axios.post(`${API_URL}/documents/${id}/classify-donut`);
+  return res.data;
 }

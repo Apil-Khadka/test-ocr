@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { fetchDocuments, analyzeDocumentAI, deleteDocument } from '../services/api';
+import React, { useEffect, useState, useRef } from 'react';
+import { fetchDocuments, analyzeDocumentAI, deleteDocument, classifyDocumentDonut } from '../services/api';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -17,11 +17,18 @@ interface Document {
   pdf_page_count?: number;
   ai_classification?: string;
   ai_summary?: string;
+  donut_classification?: string;
 }
 
 const getFileUrl = (filename: string) => `${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:3001'}/files/${filename}`;
 
 const DocumentList: React.FC = () => {
+  const [ocrQueue, setOcrQueue] = useState<number[]>([]);
+  const [aiQueue, setAiQueue] = useState<number[]>([]);
+  const [processingOcr, setProcessingOcr] = useState<number | null>(null);
+  const [processingAi, setProcessingAi] = useState<number | null>(null);
+  const [docStatus, setDocStatus] = useState<Record<number, string>>({});
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number }>({ total: 0, done: 0 });
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +38,8 @@ const DocumentList: React.FC = () => {
   const [ocrLoadingId, setOcrLoadingId] = useState<number | null>(null);
   const [aiLoadingId, setAiLoadingId] = useState<number | null>(null);
   const [filter, setFilter] = useState<string>('');
+  const [donutQueue, setDonutQueue] = useState<number[]>([]);
+  const [processingDonut, setProcessingDonut] = useState<number | null>(null);
 
   useEffect(() => {
     fetchDocuments()
@@ -51,33 +60,94 @@ const DocumentList: React.FC = () => {
     setModalTitle('');
   };
 
-  const rerunOcr = async (doc: Document) => {
-    setOcrLoadingId(doc.id);
-    try {
-      await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:3001/api'}/documents/${doc.id}/analyze`);
-      // Refetch documents after OCR
-      const docs = await fetchDocuments();
-      setDocuments(docs);
-      toast.success('OCR re-run on server completed!');
-    } catch (err: any) {
-      toast.error('Failed to re-run OCR on server');
-    } finally {
-      setOcrLoadingId(null);
-    }
+  // Helper to update status
+  const updateStatus = (id: number, status: string) => setDocStatus(s => ({ ...s, [id]: status }));
+
+  // OCR queue processor
+  useEffect(() => {
+    if (processingOcr || ocrQueue.length === 0) return;
+    const nextId = ocrQueue[0];
+    setProcessingOcr(nextId);
+    updateStatus(nextId, 'ocr-processing');
+    axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:3001/api'}/documents/${nextId}/analyze`)
+      .then(() => {
+        updateStatus(nextId, 'ocr-done');
+        setBulkProgress(p => ({ ...p, done: p.done + 1 }));
+      })
+      .catch(() => {
+        updateStatus(nextId, 'ocr-failed');
+      })
+      .finally(() => {
+        setOcrQueue(q => q.slice(1));
+        setProcessingOcr(null);
+      });
+  }, [ocrQueue, processingOcr]);
+
+  // AI queue processor
+  useEffect(() => {
+    if (processingAi || aiQueue.length === 0) return;
+    const nextId = aiQueue[0];
+    setProcessingAi(nextId);
+    updateStatus(nextId, 'ai-processing');
+    analyzeDocumentAI(nextId)
+      .then(async (res) => {
+        // If classification is null, retry once with categories
+        if (!res.classification) {
+          // Fetch current categories
+          const cats = Array.from(new Set(documents.map(d => d.ai_classification).filter((c): c is string => Boolean(c))));
+          await analyzeDocumentAI(nextId, cats);
+        }
+        updateStatus(nextId, 'ai-done');
+        setBulkProgress(p => ({ ...p, done: p.done + 1 }));
+      })
+      .catch(() => {
+        updateStatus(nextId, 'ai-failed');
+      })
+      .finally(() => {
+        setAiQueue(q => q.slice(1));
+        setProcessingAi(null);
+      });
+  }, [aiQueue, processingAi, documents]);
+
+  // Donut queue processor
+  useEffect(() => {
+    if (processingDonut || donutQueue.length === 0) return;
+    const nextId = donutQueue[0];
+    setProcessingDonut(nextId);
+    updateStatus(nextId, 'donut-processing');
+    classifyDocumentDonut(nextId)
+      .then(() => {
+        updateStatus(nextId, 'donut-done');
+        setBulkProgress(p => ({ ...p, done: p.done + 1 }));
+      })
+      .catch(() => {
+        updateStatus(nextId, 'donut-failed');
+      })
+      .finally(() => {
+        setDonutQueue(q => q.slice(1));
+        setProcessingDonut(null);
+      });
+  }, [donutQueue, processingDonut]);
+
+  // Bulk progress bar
+  const showBulkProgress = bulkProgress.total > 0 && bulkProgress.done < bulkProgress.total;
+
+  // User triggers re-OCR
+  const queueOcr = (id: number) => {
+    setOcrQueue(q => q.includes(id) ? q : [...q, id]);
+    setBulkProgress(p => ({ total: p.total + 1, done: p.done }));
   };
 
-  const runAI = async (doc: Document) => {
-    setAiLoadingId(doc.id);
-    try {
-      await analyzeDocumentAI(doc.id);
-      const docs = await fetchDocuments();
-      setDocuments(docs);
-      toast.success('AI analysis complete!');
-    } catch {
-      toast.error('AI analysis failed');
-    } finally {
-      setAiLoadingId(null);
-    }
+  // User triggers re-AI
+  const queueAi = (id: number) => {
+    setAiQueue(q => q.includes(id) ? q : [...q, id]);
+    setBulkProgress(p => ({ total: p.total + 1, done: p.done }));
+  };
+
+  // User triggers Donut classification
+  const queueDonut = (id: number) => {
+    setDonutQueue(q => q.includes(id) ? q : [...q, id]);
+    setBulkProgress(p => ({ total: p.total + 1, done: p.done }));
   };
 
   const handleDelete = async (doc: Document) => {
@@ -113,6 +183,15 @@ const DocumentList: React.FC = () => {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
+        </div>
+      )}
+      {showBulkProgress && (
+        <div className="mb-4 bg-blue-100 border border-blue-200 text-blue-800 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Processing in background:</strong>
+          <span className="block sm:inline"> {bulkProgress.done}/{bulkProgress.total} documents</span>
+          <span className="absolute top-0 bottom-0 right-0 px-4 py-3">
+            <svg className="fill-current h-6 w-6 text-blue-500" role="button" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 15a1 1 0 01-.707-.293l-4-4a1 1 0 111.414-1.414L9 12.586V3a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-4 4A1 1 0 0110 15z"/></svg>
+          </span>
         </div>
       )}
       {filteredDocs.length === 0 ? (
@@ -151,6 +230,27 @@ const DocumentList: React.FC = () => {
                   {doc.ai_summary && (
                     <div className="text-xs text-gray-700 mt-1">Summary: {doc.ai_summary}</div>
                   )}
+                  {/* Donut classification */}
+                  {doc.donut_classification && (
+                    <div className="text-xs text-pink-700 font-semibold mt-1">Donut: {doc.donut_classification}</div>
+                  )}
+                  {/* Status */}
+                  {docStatus[doc.id] && (
+                    <div className={`text-xs mt-1 ${
+                      docStatus[doc.id] === 'ocr-processing' ? 'text-yellow-700' :
+                      docStatus[doc.id] === 'ocr-done' ? 'text-green-700' :
+                      docStatus[doc.id] === 'ocr-failed' ? 'text-red-700' :
+                      docStatus[doc.id] === 'ai-processing' ? 'text-yellow-700' :
+                      docStatus[doc.id] === 'ai-done' ? 'text-green-700' :
+                      docStatus[doc.id] === 'ai-failed' ? 'text-red-700' :
+                      docStatus[doc.id] === 'donut-processing' ? 'text-yellow-700' :
+                      docStatus[doc.id] === 'donut-done' ? 'text-green-700' :
+                      docStatus[doc.id] === 'donut-failed' ? 'text-red-700' :
+                      'text-gray-500'
+                    }`}>
+                      Status: {docStatus[doc.id]}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
@@ -173,18 +273,25 @@ const DocumentList: React.FC = () => {
                 {doc.mime_type.startsWith('image/') && (
                   <button
                     className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded mt-1 disabled:opacity-60"
-                    onClick={() => rerunOcr(doc)}
-                    disabled={ocrLoadingId === doc.id}
+                    onClick={() => queueOcr(doc.id)}
+                    disabled={processingOcr === doc.id || docStatus[doc.id] === 'ocr-processing' || docStatus[doc.id] === 'ocr-done' || docStatus[doc.id] === 'ocr-failed'}
                   >
-                    {ocrLoadingId === doc.id ? 'Re-running OCR...' : 'Re-run OCR (server)'}
+                    {processingOcr === doc.id ? 'Re-running OCR...' : 'Re-run OCR (server)'}
                   </button>
                 )}
                 <button
                   className="text-xs text-white bg-purple-600 hover:bg-purple-700 px-2 py-1 rounded mt-1 disabled:opacity-60"
-                  onClick={() => runAI(doc)}
-                  disabled={aiLoadingId === doc.id}
+                  onClick={() => queueAi(doc.id)}
+                  disabled={processingAi === doc.id || docStatus[doc.id] === 'ai-processing' || docStatus[doc.id] === 'ai-done' || docStatus[doc.id] === 'ai-failed'}
                 >
-                  {aiLoadingId === doc.id ? 'Analyzing...' : 'Classify (AI)'}
+                  {processingAi === doc.id ? 'Analyzing...' : 'Classify (AI)'}
+                </button>
+                <button
+                  className="text-xs text-white bg-pink-600 hover:bg-pink-700 px-2 py-1 rounded mt-1 disabled:opacity-60"
+                  onClick={() => queueDonut(doc.id)}
+                  disabled={processingDonut === doc.id || docStatus[doc.id] === 'donut-processing' || docStatus[doc.id] === 'donut-done' || docStatus[doc.id] === 'donut-failed'}
+                >
+                  {processingDonut === doc.id ? 'Classifying (Donut)...' : 'Classify (Donut)'}
                 </button>
                 <button
                   className="text-xs text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded mt-1"

@@ -10,16 +10,31 @@ This file tracks the progress of main features for the Document Intelligence App
 - [x] Drag-and-drop file upload interface (frontend)
 - [x] File preview functionality (frontend)
 - [x] Basic file metadata extraction (text preview)
-- [ ] Document Upload & Management
-  - [ ] Support for PDF, images (JPG, PNG), and text files
+- [x] Document Upload & Management
+  - [x] Support for PDF, images (JPG, PNG), and text files
+  - [x] Delete uploaded documents
 
-- [ ] AI-Powered Document Analysis
-  - [ ] OCR text extraction from images using Tesseract.js
-  - [ ] OpenAI API integration for:
-    - [ ] Document classification (Invoice, Contract, Report, etc.)
-    - [ ] Key information extraction
-    - [ ] Document summarization
-    - [ ] Suggested folder categories
+- [x] AI-Powered Document Analysis
+  - [x] OCR text extraction from images using Tesseract.js
+  - [x] Local AI (Ollama) integration for:
+    - [x] Document classification (Invoice, Contract, Report, etc.)
+    - [x] Document summarization
+  - [ ] Key information extraction
+  - [ ] Suggested folder categories
+
+- [ ] Bulk Folder Import & Background AI Analysis
+  - [ ] Backend: Import all files from a folder, extract metadata, OCR, and save
+  - [ ] Backend: Run AI analysis in background for each document
+  - [ ] Backend: Track and expose progress for bulk analysis
+  - [ ] Frontend: Allow folder upload or selection
+  - [ ] Frontend: Show progress bar for bulk analysis
+  - [ ] Frontend: Display results as processed
+
+- [ ] Folder-like Navigation
+  - [ ] Store folder/path for each document
+  - [ ] Backend: List folders and documents by folder
+  - [ ] Frontend: Sidebar/tree for folder navigation
+  - [ ] Frontend: Display documents by folder
 
 - [ ] Smart Categorization
   - [ ] AI-suggested categories based on document content
@@ -41,11 +56,7 @@ This file tracks the progress of main features for the Document Intelligence App
 
 ## Progress Notes
 
-- Backend project initialized and Express server running.
-- Backend file upload endpoint is live for testing at POST /api/documents/upload.
-- Backend file metadata is now stored in SQLite after upload.
-- Frontend drag-and-drop file upload UI implemented and ready for testing.
-- Document listing and preview available in the frontend.
-- Extracted text for text files is now shown in the frontend document list.
+- Core document upload, preview, OCR, and AI classification are complete.
+- Next: Bulk folder import, background AI analysis with progress, and folder navigation.
 - Update this file as features are completed or added.
 - Use checkboxes to indicate status. 

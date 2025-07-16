@@ -18,6 +18,8 @@ async function init() {
       indexed_text TEXT,
       ai_classification TEXT,
       ai_summary TEXT,
+      donut_classification TEXT,
+      folder TEXT,
       upload_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -29,6 +31,12 @@ async function init() {
   }
   if (!colNames.includes('ai_summary')) {
     await db.exec('ALTER TABLE documents ADD COLUMN ai_summary TEXT;');
+  }
+  if (!colNames.includes('donut_classification')) {
+    await db.exec('ALTER TABLE documents ADD COLUMN donut_classification TEXT;');
+  }
+  if (!colNames.includes('folder')) {
+    await db.exec('ALTER TABLE documents ADD COLUMN folder TEXT;');
   }
   await db.close();
   console.log('Database initialized.');
