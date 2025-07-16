@@ -15,6 +15,7 @@ async function init() {
       image_width INTEGER,
       image_height INTEGER,
       pdf_page_count INTEGER,
+      indexed_text TEXT,
       upload_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);

@@ -5,6 +5,7 @@ import fs from 'fs';
 import { getDb } from '../models/db';
 import sharp from 'sharp';
 const pdfParse = require('pdf-parse');
+import Tesseract from 'tesseract.js';
 
 const router = express.Router();
 
@@ -48,9 +49,12 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
   let imageWidth: number | null = null;
   let imageHeight: number | null = null;
   let pdfPageCount: number | null = null;
+  let indexedText: string | null = null;
 
   try {
-    if (file.mimetype === 'text/plain') {
+    if ((file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') && req.body.ocr_text) {
+      extractedText = req.body.ocr_text;
+    } else if (file.mimetype === 'text/plain') {
       extractedText = fs.readFileSync(file.path, 'utf-8');
     } else if (file.mimetype === 'application/pdf') {
       const dataBuffer = fs.readFileSync(file.path);
@@ -58,6 +62,10 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       extractedText = pdfData.text;
       pdfPageCount = pdfData.numpages;
     } else if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
+      // fallback: no OCR text provided
+      extractedText = null;
+    }
+    if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
       const image = sharp(file.path);
       const metadata = await image.metadata();
       imageWidth = metadata.width || null;
@@ -67,10 +75,14 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
     // Ignore extraction errors, store what we can
   }
 
+  if (extractedText) {
+    indexedText = extractedText.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
   try {
     const db = await getDb();
     const result = await db.run(
-      `INSERT INTO documents (filename, original_name, file_path, file_size, mime_type, extracted_text, image_width, image_height, pdf_page_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO documents (filename, original_name, file_path, file_size, mime_type, extracted_text, image_width, image_height, pdf_page_count, indexed_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       file.filename,
       file.originalname,
       file.path,
@@ -79,7 +91,8 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       extractedText,
       imageWidth,
       imageHeight,
-      pdfPageCount
+      pdfPageCount,
+      indexedText
     );
     await db.close();
     res.json({
@@ -108,6 +121,32 @@ router.get('/', async (req: Request, res: Response) => {
     res.json(docs);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch documents', details: (err as Error).message });
+  }
+});
+
+// POST /api/documents/:id/analyze
+router.post('/:id/analyze', async (req: Request, res: Response) => {
+  const docId = req.params.id;
+  try {
+    const db = await getDb();
+    const doc = await db.get('SELECT * FROM documents WHERE id = ?', docId);
+    if (!doc) {
+      await db.close();
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    if (!(doc.mime_type === 'image/jpeg' || doc.mime_type === 'image/png')) {
+      await db.close();
+      return res.status(400).json({ error: 'OCR can only be re-run on images' });
+    }
+    // Run Tesseract.js on the server
+    const result = await Tesseract.recognize(doc.file_path, 'eng', { logger: () => {} });
+    const ocrText = ((result as any).data.text && (result as any).data.text.trim()) ? (result as any).data.text : 'No text found';
+    const indexedText = ocrText.toLowerCase().replace(/\s+/g, ' ').trim();
+    await db.run('UPDATE documents SET extracted_text = ?, indexed_text = ? WHERE id = ?', ocrText, indexedText, docId);
+    await db.close();
+    res.json({ extracted_text: ocrText });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to re-run OCR', details: (err as Error).message });
   }
 });
 
