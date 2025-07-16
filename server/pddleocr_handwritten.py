@@ -68,7 +68,7 @@ def run_paddleocr_on_images(images, output_prefix='output', lang='en'):
         temp_path = f"/tmp/_ocr_temp_{idx}.png"
         img.save(temp_path)
 
-        result = ocr.ocr(temp_path, cls=True)
+        result = ocr.ocr(temp_path)
 
         # Print OCR results
         full_text = ""
