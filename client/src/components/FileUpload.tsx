@@ -6,12 +6,23 @@ import Tesseract from 'tesseract.js';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
-const FileUpload: React.FC = () => {
+const FileUpload: React.FC<{ onBulkUpload?: () => void }> = ({ onBulkUpload }) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrText, setOcrText] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number }>({ total: 0, done: 0 });
+  const [fileStatuses, setFileStatuses] = useState<{ name: string; ocr: number; upload: number; status: string; ocrText?: string }[]>([]);
+
+  // Helper to update status for a file
+  const updateFileStatus = (idx: number, update: Partial<{ ocr: number; upload: number; status: string; ocrText?: string }>) => {
+    setFileStatuses(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...update };
+      return next;
+    });
+  };
 
   const runOcr = async (file: File) => {
     setOcrProgress(0);
@@ -28,6 +39,90 @@ const FileUpload: React.FC = () => {
       setOcrText(text && text.trim() ? text : 'No text found');
     } catch (err) {
       setOcrText('OCR failed.');
+    }
+  };
+
+  // Bulk folder upload handler with backend integration and progress polling
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setBulkProgress({ total: files.length, done: 0 });
+    setUploading(true);
+    setFileStatuses(Array.from(files).map(f => ({ name: f.name, ocr: 0, upload: 0, status: 'pending' })));
+
+    // Run OCR on images before upload
+    const ocrTexts: Record<string, string> = {};
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type === 'image/jpeg' || file.type === 'image/png') {
+        updateFileStatus(i, { status: 'ocr' });
+        try {
+          const result = await Tesseract.recognize(file, 'eng', {
+            logger: (m: { status: string; progress?: number }) => {
+              if (m.status === 'recognizing text' && m.progress) {
+                updateFileStatus(i, { ocr: Math.round(m.progress * 100) });
+              }
+            },
+          });
+          const ocrText = (result as any).data.text?.trim() || '';
+          ocrTexts[file.name] = ocrText;
+          updateFileStatus(i, { ocr: 100, ocrText, status: 'pending' });
+        } catch {
+          updateFileStatus(i, { ocr: 100, ocrText: 'OCR failed.', status: 'pending' });
+        }
+      } else {
+        updateFileStatus(i, { ocr: 100, status: 'pending' });
+      }
+    }
+
+    // Prepare FormData for bulk upload
+    const formData = new FormData();
+    Array.from(files).forEach((file) => {
+      formData.append('files', file);
+    });
+    formData.append('ocr_texts', JSON.stringify(ocrTexts));
+
+    // Send all files in one request
+    let jobId: string | null = null;
+    try {
+      const response = await axios.post(`${API_URL}/documents/bulk-upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      jobId = response.data.jobId;
+      setBulkProgress({ total: response.data.total, done: 0 });
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Bulk upload failed');
+      setUploading(false);
+      return;
+    }
+
+    // Poll progress endpoint
+    if (jobId) {
+      let polling = true;
+      const poll = async () => {
+        try {
+          const res = await axios.get(`${API_URL}/documents/bulk-progress/${jobId}`);
+          setBulkProgress({ total: res.data.total, done: res.data.uploaded });
+          // Optionally, show AI progress as well
+          setFileStatuses((prev) => prev.map((f, idx) => {
+            if (idx < res.data.uploaded) {
+              return { ...f, status: 'uploaded' };
+            }
+            return f;
+          }));
+          if (res.data.uploaded < res.data.total || res.data.aiAnalyzed < res.data.total) {
+            setTimeout(poll, 1000);
+          } else {
+            polling = false;
+            setUploading(false);
+            toast.success('Bulk upload and AI analysis complete!');
+            if (onBulkUpload) onBulkUpload();
+          }
+        } catch {
+          setTimeout(poll, 2000);
+        }
+      };
+      poll();
     }
   };
 
@@ -88,6 +183,36 @@ const FileUpload: React.FC = () => {
   return (
     <div className="w-full max-w-md mx-auto mt-10">
       <Toaster />
+      <div className="mb-4">
+        <label className="block mb-2 font-medium">Bulk Upload Folder</label>
+        <input
+          type="file"
+          multiple
+          // @ts-ignore
+          webkitdirectory
+          onChange={handleFolderUpload}
+          className="block border rounded px-2 py-1 text-sm"
+          disabled={uploading}
+        />
+        {bulkProgress.total > 0 && (
+          <div className="mt-2 text-xs text-gray-700">
+            Uploading: {bulkProgress.done}/{bulkProgress.total}
+          </div>
+        )}
+        {fileStatuses.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {fileStatuses.map((f, idx) => (
+              <div key={idx} className="text-xs flex flex-col border-b pb-1">
+                <span><strong>{f.name}</strong> - {f.status === 'ocr' ? `OCR: ${f.ocr}%` : f.status === 'upload' ? `Uploading: ${f.upload}%` : f.status === 'done' ? 'Done' : f.status === 'failed' ? 'Failed' : 'Pending'}</span>
+                {f.ocrText && f.ocrText !== '' && f.ocrText !== 'OCR failed.' && (
+                  <span className="text-gray-500">OCR: {f.ocrText.slice(0, 60)}{f.ocrText.length > 60 ? '...' : ''}</span>
+                )}
+                {f.ocrText === 'OCR failed.' && <span className="text-red-500">OCR failed</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div
         {...getRootProps()}
         className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center transition-colors duration-200 ${
@@ -120,12 +245,7 @@ const FileUpload: React.FC = () => {
         )}
         {uploading && (
           <div className="w-full mt-4">
-            <div className="h-2 bg-gray-200 rounded-full">
-              <div
-                className="h-2 bg-blue-500 rounded-full transition-all duration-200"
-                style={{ width: `${progress}%` }}
-              ></div>
-            </div>
+            <div className="h-2 bg-blue-500 rounded-full transition-all duration-200" style={{ width: `${progress}%` }}></div>
             <p className="text-xs text-gray-500 mt-1">Uploading... {progress}%</p>
           </div>
         )}
@@ -134,4 +254,4 @@ const FileUpload: React.FC = () => {
   );
 };
 
-export default FileUpload; 
+export default FileUpload;

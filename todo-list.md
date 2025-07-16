@@ -22,25 +22,27 @@ This file tracks the progress of main features for the Document Intelligence App
   - [ ] Key information extraction
   - [ ] Suggested folder categories
 
-- [ ] Bulk Folder Import & Background AI Analysis
-  - [ ] Backend: Import all files from a folder, extract metadata, OCR, and save
-  - [ ] Backend: Run AI analysis in background for each document
-  - [ ] Backend: Track and expose progress for bulk analysis
-  - [ ] Frontend: Allow folder upload or selection
-  - [ ] Frontend: Show progress bar for bulk analysis
-  - [ ] Frontend: Display results as processed
+- [x] Bulk Folder Import & Background AI Analysis
+  - [x] Backend: Import all files from a folder, extract metadata, OCR, and save
+  - [x] Backend: Run AI analysis in background for each document
+  - [x] Backend: Track and expose progress for bulk analysis
+  - [x] Frontend: Allow folder upload or selection
+  - [x] Frontend: Show progress bar for bulk analysis
+  - [x] Frontend: Display results as processed
+  - [x] Frontend: Queue performs OCR on each file after folder selection, before uploading to backend (OCR is now saved on bulk upload)
 
-- [ ] Folder-like Navigation
-  - [ ] Store folder/path for each document
-  - [ ] Backend: List folders and documents by folder
-  - [ ] Frontend: Sidebar/tree for folder navigation
-  - [ ] Frontend: Display documents by folder
+- [x] Folder-like Navigation
+  - [x] Store folder/path for each document (now set to category name)
+  - [x] Backend: List folders and documents by folder
+  - [x] Frontend: Sidebar/tree for folder navigation (by category)
+  - [x] Frontend: Display documents by folder (category)
 
-- [ ] Smart Categorization
-  - [ ] AI-suggested categories based on document content
-  - [ ] User-defined custom categories
-  - [ ] Auto-filing based on document type
-  - [ ] Tag system for better organization
+- [x] Smart Categorization
+  - [x] AI-suggested categories based on document content
+  - [x] User-defined custom categories (editable in UI)
+  - [x] Auto-filing based on document type (category)
+  - [x] Tag system for better organization (category = folder)
+  - [x] Files are moved to category-named folders and served from any subfolder
 
 - [ ] Search & Retrieval
   - [ ] Full-text search across all documents
@@ -56,7 +58,8 @@ This file tracks the progress of main features for the Document Intelligence App
 
 ## Progress Notes
 
-- Core document upload, preview, OCR, and AI classification are complete.
-- Next: Bulk folder import, background AI analysis with progress, and folder navigation.
+- Core document upload, preview, OCR, AI classification, smart categorization, and smart foldering are complete.
+- Files are now moved to category-named folders and served from any subfolder.
+- Next: Search & Retrieval (full-text search, filters, recent docs).
 - Update this file as features are completed or added.
 - Use checkboxes to indicate status. 
